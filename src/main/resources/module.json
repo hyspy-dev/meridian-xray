@@ -1,0 +1,6 @@
+{
+  "name": "Meridian Xray",
+  "version": "1.0.0",
+  "main": "meridian.xray.XrayModule",
+  "priority": 100
+}
