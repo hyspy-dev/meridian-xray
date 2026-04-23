@@ -13,5 +13,6 @@ Place the JAR in the world's module directory:
 ## Requirements
 * `meridian-proxy`
 
-## Demonstration
-![Meridian XRay Toggle Showcase](https://youtu.be/O_rd1cLwxMI)
+## YouTube Demonstration
+
+https://youtu.be/O_rd1cLwxMI
