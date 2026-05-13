@@ -102,8 +102,7 @@ public class XrayHandler implements PacketHandler {
             applyMods(entry.getKey(), entry.getValue());
         }
         log.info("Mutated {} packet: xray={}, nv={}", update.type, xrayEnabled, nightVisionEnabled);
-        resend(session, update);
-        return Action.DROP;
+        return Action.MODIFIED;
     }
 
     private static void applyMods(int id, BlockType bt) {
@@ -118,7 +117,7 @@ public class XrayHandler implements PacketHandler {
 
     private static void resend(ProxySession session, Packet packet) {
         ByteBuf out = Unpooled.buffer();
-        PacketIO.writeFramedPacket(packet, packet.getClass(), out, PacketStatsRecorder.NOOP);
+        PacketIO.writeFramedPacket(packet, packet.getClass(), out, out.alloc(), PacketStatsRecorder.NOOP);
         session.sendRawToClient(out);
     }
 
