@@ -5,8 +5,11 @@
 
     <groupId>meridian</groupId>
     <artifactId>meridian-xray</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>2.0.0-SNAPSHOT</version>
 
+    <!-- xray-2: a pure Layer-2 module. Talks only to meridian-api +
+         meridian-core-api — no meridian-protocol, no raw packets. A Hytale
+         protocol change cannot reach this module. -->
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
@@ -16,20 +19,20 @@
     <dependencies>
         <dependency>
             <groupId>meridian</groupId>
-            <artifactId>meridian-proxy</artifactId>
+            <artifactId>meridian-api</artifactId>
             <version>1.0.0-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>meridian</groupId>
+            <artifactId>meridian-core-api</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
             <version>2.0.9</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.netty</groupId>
-            <artifactId>netty-all</artifactId>
-            <version>4.1.100.Final</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
