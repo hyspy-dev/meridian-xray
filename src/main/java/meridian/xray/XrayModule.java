@@ -56,6 +56,8 @@ public class XrayModule implements ProxyModule {
                             refresh();
                         })
                         .build())
+                // Session-only — X-Ray and Night Vision always start off.
+                .ephemeral()
                 .build());
 
         log.info("XrayModule (v2) enabled — backed by meridian-core WorldState");
