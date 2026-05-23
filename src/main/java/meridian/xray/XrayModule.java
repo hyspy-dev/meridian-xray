@@ -45,6 +45,9 @@ public class XrayModule implements ProxyModule {
 
         // Declarative settings — rendered and persisted by the proxy. Each
         // callback fires with the persisted value at startup and on every edit.
+        // Both toggles are session-only — X-Ray and Night Vision always start
+        // off, by design. With opt-in persistence that's the default: no
+        // .persistent() call.
         ctx.registerSettings(SettingsSpec.builder()
                 .section("X-Ray", SettingsSpec.builder()
                         .bool("xray", "Enable X-Ray", false, v -> {
@@ -56,8 +59,6 @@ public class XrayModule implements ProxyModule {
                             refresh();
                         })
                         .build())
-                // Session-only — X-Ray and Night Vision always start off.
-                .ephemeral()
                 .build());
 
         log.info("XrayModule (v2) enabled — backed by meridian-core WorldState");
