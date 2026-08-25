@@ -1,6 +1,6 @@
 {
   "name": "Meridian Xray",
-  "version": "2.0.0",
+  "version": "${project.version}",
   "main": "meridian.xray.XrayModule",
   "priority": 100,
   "updateUrl": "https://github.com/hyspy-dev/meridian-xray/releases",
