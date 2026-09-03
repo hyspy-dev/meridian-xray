@@ -23,8 +23,27 @@ modules/
 
 ## Features
 
-- **X-Ray** — hides `Soil_*` and `Rock_*` block types (grass, dirt, stone,
-  sandstone, basalt, volcanic, ...).
+- **X-Ray** — sees through `Soil_*` and `Rock_*` block types (grass, dirt, stone,
+  sandstone, basalt, volcanic, ...), in one of two modes:
+  - **Hide** — the blocks are not drawn at all.
+  - **Frame** — each block keeps its own texture with a window cut into the
+    middle, leaving a border of a few pixels (the width is a setting). The
+    original picture comes from the game's `Assets.zip` (via `meridian-core`'s
+    `GameAssets`); the cut copy is handed to the client **while it loads a
+    world**, under the original's name (via `ClientAssets.provideAtConnect`),
+    the way a server mod overrides a vanilla texture. In the session the toggle
+    only switches the block's opacity, so it is instant. Terrain keeps its
+    outline and colour; ore shows through the holes. `Frame opacity` picks
+    between the glass-like transparent mode (inner faces between same-type
+    blocks are culled) and the leaves-like cutout mode. Transparent is the
+    one that renders the holes for soil and rock; cutout leaves them solid.
+  - **Frame glow** — a light radius the targeted blocks emit, so the ground
+    the frames reveal is lit without a separate night-vision pass.
+
+    Choose the mode **before joining**: the client binds block types to their
+    textures by hash when it loads a world and crashes if such a texture is
+    taken away or replaced afterwards, so nothing is swapped mid-session. A
+    world joined with Frame off hides the blocks until the next connect.
 - **Night Vision** — makes every block emit a dim light.
 
 Toggle both from the module's settings panel in the proxy window.

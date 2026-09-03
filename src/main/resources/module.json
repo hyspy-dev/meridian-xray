@@ -8,6 +8,9 @@
     "meridian-core": ">=0.1.0"
   },
   "requires": {
-    "services": ["meridian.core.api.WorldState"]
+    "services": [
+      "meridian.core.api.WorldState",
+      "meridian.core.api.ClientAssets"
+    ]
   }
 }
