@@ -10,11 +10,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.imageio.ImageIO;
-import meridian.api.event.EventPriority;
-import meridian.api.event.PhaseChangedEvent;
 import meridian.api.module.ModuleContext;
 import meridian.api.module.ProxyModule;
-import meridian.api.session.SessionPhase;
 import meridian.api.settings.SettingsSpec;
 import meridian.core.api.BlockView;
 import meridian.core.api.ClientAssets;
@@ -36,28 +33,38 @@ import org.slf4j.Logger;
  * original is cut to leave a {@link #BORDER}-pixel frame. The cut copies are handed to the client
  * while it loads a world (via {@link ClientAssets#provideAtConnect}), so they are indexed by then;
  * the actual re-point of a block type onto its copy — plus the see-through opacity and the glow —
- * is a per-id {@link WorldState#overrideBlockType} applied on the X-Ray toggle. Once a texture is
- * indexed, the client re-points to it from a mid-session update, so the toggle is fully live: off
- * leaves the blocks exactly as the server sent them (no frame in the shadows or the hand), on
- * turns them into lit see-through frames.
+ * is one rule over every block type ({@link WorldState#overrideAllBlockTypes}), set again on the
+ * X-Ray toggle. Once a texture is indexed, the client re-points to it from a mid-session update,
+ * so the toggle is fully live: off leaves the blocks exactly as the server sent them (no frame in
+ * the shadows or the hand), on turns them into lit see-through frames. Core runs the rule over
+ * the types the server declares later too, and sends only the types it changes.
+ *
+ * <p>The ground is what the server's item catalog files under {@link #TERRAIN} - rocks and soils,
+ * a mod's included - not a list of names.
  *
  * <p>The module contract any other module builds on the same way: {@link ClientAssets#provideAtConnect}
- * delivers a texture for the load, and {@link WorldState#overrideBlockType} re-points / lights a
- * block per id (a small live update). A "glow ores" module is the light alone, no textures.
+ * delivers a texture for the load, and {@link WorldState#overrideAllBlockTypes} re-points / lights
+ * the blocks (a small live update). A "glow ores" module is the light alone, no textures.
  */
 public class XrayModule implements ProxyModule {
-    /** Block-name prefixes the module reveals — the natural terrain ore grows in. */
-    private static final Set<String> TARGET_PREFIXES =
+    /** The item categories the module reveals — the natural terrain ore grows in. */
+    static final Set<String> TERRAIN = Set.of("Blocks.Rocks", "Blocks.Soils", "Blocks.Soil");
+    /**
+     * Which of the game's textures are cut into frames: the terrain's, by file name. Chosen by name
+     * because the cut copies ride the connect-time load, which comes before this connection's block
+     * types do; a terrain block whose texture is not among them is hidden rather than framed.
+     */
+    private static final Set<String> TEXTURE_PREFIXES =
             Set.of("Soil_", "Rock_", "Clay_", "Calcite", "Peachstone", "Chalk");
     /** Where the game keeps its block textures. */
     private static final String TEXTURES = "Common/BlockTextures/";
-    /** The air block's catalog name ({@code BlockType.EMPTY_KEY}, id 0) — lighting it lifts the dark. */
-    private static final String AIR = "Empty";
+    /** The name core keeps this module's rule over every block type under. */
+    static final String RULE = "xray";
     /** Frame border width, in pixels — fixed at 4, which reads well on the 32px terrain textures. */
     private static final int BORDER = 4;
 
     // Warm light the targeted blocks emit, so the ground the frames reveal is not pitch dark.
-    // Colour channels are 0..15 (the game's ColorLight is three 4-bit values); radius is the reach.
+    // Colour channels are 0..15, as core takes them (BlockView.withLight); radius is the reach.
     private static final int GLOW_RED = 8;
     private static final int GLOW_GREEN = 7;
     private static final int GLOW_BLUE = 5;
@@ -105,14 +112,6 @@ public class XrayModule implements ProxyModule {
             refresh();
         });
 
-        // (Re)apply once the world's block types are loaded (and again at JOINING — WORLD_LOADED
-        // rises on the very packet the connect-time files ride, so JOINING confirms them).
-        ctx.events().subscribe(PhaseChangedEvent.class, EventPriority.NORMAL, e -> {
-            if (e.to() == SessionPhase.WORLD_LOADED || e.to() == SessionPhase.JOINING) {
-                refresh();
-            }
-        });
-
         // Declarative settings — rendered and persisted by the proxy. Each callback fires with the
         // persisted value at load and on every edit. The X-Ray toggle is session-only (starts off);
         // how it looks is remembered, and must be, since the framed textures ship at world load.
@@ -138,45 +137,54 @@ public class XrayModule implements ProxyModule {
     }
 
     /**
-     * Recomputes the desired override for every block type. Idempotent: it can be called on any
-     * toggle or phase change and converges to the correct state. One at a time - settings, phase
-     * changes and the texture load call it from their own threads.
+     * Sets the rule core runs over every block type, or takes it away when there is nothing to do.
+     * Idempotent: called on any toggle and once the textures are read. Core applies it to the
+     * types already declared and to those declared later, the load included, and sends the
+     * client only the types whose look it changes. One at a time - settings and the texture load
+     * call it from their own threads.
      */
     private synchronized void refresh() {
         if (world == null) return;
         // Only the delivery is load-time (the copies must be indexed before they can be referenced);
-        // the re-point, opacity and lights are all per-id overrides that emit a small mid-session
-        // update and take effect live — texture, occlusion and light all recompute for a pushed id.
+        // the re-point, opacity and lights all go out as a small mid-session update and take
+        // effect live — texture, occlusion and light all recompute for a pushed type.
         syncFrames();
-        boolean frame = xrayEnabled && mode == Mode.FRAME;
-        int overridden = 0;
-        for (BlockView bv : world.allBlockTypes()) {
-            boolean xray = xrayEnabled && isTarget(bv.name());
-            // Air is its own switch (fullbright), independent of X-Ray.
-            boolean lightAir = airGlow && AIR.equals(bv.name());
-            if (!xray && !lightAir) {
-                world.clearOverride(bv.id());
-                continue;
-            }
-            boolean asFrame = xray && frame && isFramedOnClient(bv);
-            world.overrideBlockType(bv.id(), b -> {
-                BlockView r = b;
-                // Bind the framed texture here, on the toggle — the copies are delivered+indexed at
-                // load, so this only re-points an already-indexed name, which the client does live.
-                // Transparent is the opacity that actually renders the holes for these blocks.
-                if (xray) {
-                    r = asFrame
-                            ? r.withTextures(framedNames::get).withOpacity(BlockView.Opacity.TRANSPARENT)
-                            : r.withVisible(false);
-                    r = r.withLight(GLOW_RADIUS, GLOW_RED, GLOW_GREEN, GLOW_BLUE);
-                }
-                if (lightAir) r = r.withLight(GLOW_RADIUS, AIR_RED, AIR_GREEN, AIR_BLUE);
-                return r;
-            });
-            overridden++;
+        if (xrayEnabled || airGlow) {
+            world.overrideAllBlockTypes(RULE, this::look);
+        } else {
+            world.clearOverrideAll(RULE);
         }
-        log.info("X-Ray={} mode={} airGlow={} — {} block(s) overridden",
-                xrayEnabled, mode, airGlow, overridden);
+        log.info("X-Ray={} mode={} airGlow={}", xrayEnabled, mode, airGlow);
+    }
+
+    /** How one block type looks with X-Ray and the air glow as they are now; itself if untouched. */
+    BlockView look(BlockView b) {
+        boolean xray = xrayEnabled && isTerrain(b);
+        // Air is its own switch (fullbright), independent of X-Ray.
+        boolean lightAir = airGlow && BlockView.EMPTY.equals(b.name());
+        if (!xray && !lightAir) {
+            return b;
+        }
+        BlockView r = b;
+        // Bind the framed texture here, on the toggle — the copies are delivered+indexed at
+        // load, so this only re-points an already-indexed name, which the client does live.
+        // Transparent is the opacity that actually renders the holes for these blocks.
+        if (xray) {
+            r = mode == Mode.FRAME && isFramedOnClient(b)
+                    ? r.withTextures(framedNames::get).withOpacity(BlockView.Opacity.TRANSPARENT)
+                    : r.withVisible(false);
+            r = r.withLight(GLOW_RADIUS, GLOW_RED, GLOW_GREEN, GLOW_BLUE);
+        }
+        if (lightAir) r = r.withLight(GLOW_RADIUS, AIR_RED, AIR_GREEN, AIR_BLUE);
+        return r;
+    }
+
+    /** Terrain: a block whose item the server's catalog files under rocks or soils. */
+    static boolean isTerrain(BlockView b) {
+        for (String category : b.categories()) {
+            if (TERRAIN.contains(category)) return true;
+        }
+        return false;
     }
 
     /**
@@ -200,8 +208,7 @@ public class XrayModule implements ProxyModule {
 
     /**
      * Only delivers the framed textures for the load (so the client indexes them); the actual
-     * re-point onto the block types is a per-id override in {@link #refresh()}, applied on the
-     * X-Ray toggle. TEST: this is the live-rebind experiment — if the client re-points an
+     * re-point onto the block types is the rule {@link #refresh()} sets, on the X-Ray toggle. TEST: this is the live-rebind experiment — if the client re-points an
      * already-indexed texture from a mid-session update, X-Ray off leaves the blocks truly normal
      * (no ghost frame in the shadows or the hand); if it does not, we fall back to load-time.
      */
@@ -295,7 +302,7 @@ public class XrayModule implements ProxyModule {
         int loaded = 0;
         for (String path : game.list(TEXTURES)) {
             String name = path.substring(TEXTURES.length());
-            if (name.indexOf('/') >= 0 || !name.endsWith(".png") || !isTarget(name)) continue;
+            if (name.indexOf('/') >= 0 || !name.endsWith(".png") || !isTerrainTexture(name)) continue;
             byte[] bytes = game.read(path).orElse(null);
             if (bytes != null) {
                 source.put("BlockTextures/" + name, bytes);
@@ -306,9 +313,8 @@ public class XrayModule implements ProxyModule {
         texturesLoaded = true;
     }
 
-    private static boolean isTarget(String name) {
-        if (name == null) return false;
-        for (String prefix : TARGET_PREFIXES) {
+    private static boolean isTerrainTexture(String name) {
+        for (String prefix : TEXTURE_PREFIXES) {
             if (name.startsWith(prefix)) return true;
         }
         return false;
